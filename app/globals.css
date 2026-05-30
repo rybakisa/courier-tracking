@@ -429,6 +429,23 @@ a:hover {
   font-size: 13px;
 }
 
+.prose .mermaid {
+  margin: 22px 0;
+  text-align: center;
+}
+
+.prose .mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Прячем исходник диаграммы, пока Mermaid не отрисовал её в SVG. */
+.prose .mermaid:not([data-processed='true']) {
+  visibility: hidden;
+  height: 0;
+  overflow: hidden;
+}
+
 .prose table {
   border-collapse: collapse;
   width: 100%;
@@ -453,6 +470,21 @@ a:hover {
 
 .prose tr:nth-child(even) td {
   background: #fcfcfd;
+}
+
+/* ---------- requirement refs (FR/NFR) ---------- */
+.prose a.req-ref {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px dotted var(--text-muted);
+  cursor: help;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.prose a.req-ref:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 
 /* ---------- pager ---------- */
@@ -483,6 +515,40 @@ a:hover {
 .pager-link.right {
   text-align: right;
   margin-left: auto;
+}
+
+/* ---------- api spec (swagger ui) ---------- */
+.api-spec {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 32px 24px 16px;
+}
+
+.api-spec-back {
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+.api-spec-head h1 {
+  font-size: 27px;
+  letter-spacing: -0.02em;
+  margin: 12px 0 8px;
+}
+
+.api-spec-head p {
+  color: var(--text-muted);
+  font-size: 14.5px;
+  max-width: 760px;
+  margin: 0 0 8px;
+}
+
+.api-spec-loading {
+  color: var(--text-muted);
+  padding: 24px 0;
+}
+
+.api-spec .swagger-ui {
+  margin-top: 4px;
 }
 
 /* ---------- responsive ---------- */

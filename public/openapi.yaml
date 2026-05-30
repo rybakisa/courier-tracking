@@ -1,0 +1,632 @@
+openapi: 3.1.0
+info:
+  title: Courier Tracking — REST API
+  version: "1.0.0"
+  description: |
+    REST-поверхность системы, сгруппированная по функциям: отправка положений курьером,
+    API диспетчера, API клиента и общий хендшейк. Покрывает **только** request/response:
+    чтение истории и маршрута, снапшот вьюпорта, текущую позицию и выдачу тикета на стрим.
+
+    Realtime-потоки (приём положений, подписка клиента, живой вьюпорт) идут по **WebSocket**
+    и описаны в артефакте `03_api.md` (§2–§4) — они не часть этого OpenAPI-контракта.
+  contact:
+    name: System Design — Courier Tracking
+servers:
+  - url: https://api.example.com
+    description: Production (условный хост)
+security:
+  - bearerAuth: []
+tags:
+  - name: Курьер — отправка положений
+    description: |
+      Основной путь приёма положений — WebSocket (см. артефакт API, §2): курьер держит
+      соединение, частота адаптируется по движению и наличию наблюдателей. Здесь — только
+      REST-fallback, когда постоянное соединение невозможно.
+  - name: Диспетчер
+    description: Снапшот области с кластеризацией и чтение истории (маршрут за день, период). Живой вьюпорт — по WebSocket (§3).
+  - name: Клиент
+    description: Текущая позиция курьера для первой отрисовки. Живое слежение — по WebSocket (§4).
+  - name: Хендшейк
+    description: Выдача короткоживущего тикета для открытия любого WebSocket-стрима.
+
+paths:
+  /v1/realtime/tickets:
+    post:
+      tags: [Хендшейк]
+      operationId: createRealtimeTicket
+      summary: Выдать тикет на WebSocket-стрим
+      description: |
+        Возвращает одноразовый короткоживущий тикет и URL стрима для роли. Тикет предъявляется при
+        открытии WebSocket. Аутентификация — Bearer JWT от внешнего identity-сервиса.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketRequest'
+            example:
+              role: client
+      responses:
+        '201':
+          description: Тикет выдан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketResponse'
+              example:
+                ticket: "rt_9f2a3b7c...e1"
+                streamUrl: "wss://rt.example.com/v1/stream/client"
+                expiresInSec: 30
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/couriers/{courierId}/position:
+    get:
+      tags: [Клиент]
+      operationId: getCourierPosition
+      summary: Текущая позиция курьера
+      description: |
+        Последняя известная позиция одного курьера. Используется клиентом для мгновенной первой
+        отрисовки до установки WebSocket и для отладки. Данные — eventual consistency, ответ несёт
+        `asOf` и `stalenessMs`. Если курьер офлайн — `200` с `online: false`.
+      parameters:
+        - $ref: '#/components/parameters/CourierId'
+      responses:
+        '200':
+          description: Текущая (возможно слегка устаревшая) позиция
+          headers:
+            Cache-Control:
+              schema: { type: string, example: "no-store" }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Position'
+              example:
+                courierId: c_123
+                online: true
+                ts: "2026-05-28T10:00:03Z"
+                lat: 55.751244
+                lon: 37.618423
+                speedMps: 4.2
+                headingDeg: 270
+                asOf: "2026-05-28T10:00:03Z"
+                stalenessMs: 180
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/CourierNotFound'
+        '503':
+          $ref: '#/components/responses/Degraded'
+
+  /v1/viewport:
+    get:
+      tags: [Диспетчер]
+      operationId: getViewportSnapshot
+      summary: Кластеризованный снапшот вьюпорта
+      description: |
+        Снапшот всех курьеров в области карты с серверной кластеризацией (~150 маркеров на вьюпорт
+        независимо от плотности). Покрывает первую отрисовку диспетчера; live-обновления идут по
+        WebSocket.
+      parameters:
+        - name: bbox
+          in: query
+          required: true
+          description: Границы области `minLon,minLat,maxLon,maxLat`.
+          schema:
+            type: string
+            pattern: '^-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?$'
+          example: "37.55,55.70,37.70,55.80"
+        - name: zoom
+          in: query
+          required: true
+          description: Уровень зума карты (влияет на гранулярность кластеризации).
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 22
+          example: 12
+      responses:
+        '200':
+          description: Снапшот вьюпорта
+          headers:
+            Cache-Control:
+              schema: { type: string, example: "no-store" }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ViewportSnapshot'
+              example:
+                asOf: "2026-05-28T10:00:05Z"
+                zoom: 12
+                cells:
+                  - { key: "u8x1", count: 42, lat: 55.75, lon: 37.61, bbox: [37.60, 55.74, 37.63, 55.76] }
+                markers:
+                  - { courierId: c_123, ts: "2026-05-28T10:00:04Z", lat: 55.7512, lon: 37.6184 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '503':
+          $ref: '#/components/responses/Degraded'
+
+  /v1/couriers/{courierId}/route:
+    get:
+      tags: [Диспетчер]
+      operationId: getCourierRoute
+      summary: Маршрут курьера за сегодня
+      description: |
+        Полный маршрут за один день (по умолчанию — сегодня). За текущий день маршрут дополняется,
+        поэтому кэш короткий и ревалидируемый.
+      parameters:
+        - $ref: '#/components/parameters/CourierId'
+        - name: date
+          in: query
+          required: false
+          description: День в формате `YYYY-MM-DD`. По умолчанию — сегодня в TZ курьера.
+          schema: { type: string, format: date }
+          example: "2026-05-28"
+        - $ref: '#/components/parameters/Granularity'
+        - $ref: '#/components/parameters/Format'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Маршрут за день
+          headers:
+            Cache-Control:
+              schema: { type: string, example: "public, max-age=15, must-revalidate" }
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Track'
+              example:
+                courierId: c_123
+                date: "2026-05-28"
+                granularity: "4s"
+                count: 5000
+                points:
+                  - [1748426400000, 55.7512, 37.6184]
+                  - [1748426404000, 55.7513, 37.6185]
+                next: "eyJvZmZzZXQiOjUwMDB9"
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/CourierNotFound'
+        '416':
+          $ref: '#/components/responses/BadRange'
+
+  /v1/couriers/{courierId}/history:
+    get:
+      tags: [Диспетчер]
+      operationId: getCourierHistory
+      summary: История перемещений за период
+      description: |
+        История за произвольный период. Прошедшие дни immutable и агрессивно кэшируются. Глубина
+        хранения — 1 год; запрос за пределы retention возвращает `410 Gone`.
+      parameters:
+        - $ref: '#/components/parameters/CourierId'
+        - name: from
+          in: query
+          required: true
+          description: Начало периода (ISO-8601).
+          schema: { type: string, format: date-time }
+          example: "2026-05-01T00:00:00Z"
+        - name: to
+          in: query
+          required: true
+          description: Конец периода (ISO-8601).
+          schema: { type: string, format: date-time }
+          example: "2026-05-02T00:00:00Z"
+        - $ref: '#/components/parameters/Granularity'
+        - $ref: '#/components/parameters/Format'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: История за период
+          headers:
+            Cache-Control:
+              schema: { type: string, example: "public, max-age=31536000, immutable" }
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Track'
+              example:
+                courierId: c_123
+                from: "2026-05-01T00:00:00Z"
+                to: "2026-05-02T00:00:00Z"
+                granularity: "30s"
+                geojson:
+                  type: LineString
+                  coordinates:
+                    - [37.6184, 55.7512]
+                    - [37.6185, 55.7513]
+                next: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/CourierNotFound'
+        '410':
+          $ref: '#/components/responses/HistoryPurged'
+        '416':
+          $ref: '#/components/responses/BadRange'
+
+  /v1/couriers/{courierId}/pings:
+    post:
+      tags: [Курьер — отправка положений]
+      operationId: ingestPingsFallback
+      summary: Приём пинга батчем (fallback)
+      description: |
+        **Вторичный путь.** Основной приём пинга — по WebSocket. Этот эндпоинт нужен лишь там, где
+        постоянное соединение невозможно: устройство копит точки и шлёт батчем. Идемпотентность —
+        по заголовку `Idempotency-Key` и по `(courierId, seq)` внутри батча.
+      parameters:
+        - $ref: '#/components/parameters/CourierId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Уникальный ключ батча для безопасных ретраев.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PingBatch'
+            example:
+              points:
+                - seq: 1001
+                  ts: "2026-05-28T10:00:00Z"
+                  lat: 55.7512
+                  lon: 37.6184
+                  accuracyM: 8
+                  speedMps: 4.2
+                  headingDeg: 270
+                  batteryPct: 73
+      responses:
+        '202':
+          description: Батч принят (durable-запись в лог-брокер)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, duplicates]
+                properties:
+                  accepted: { type: integer, example: 1 }
+                  duplicates: { type: integer, example: 0 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT, выданный внешним identity-сервисом (вне скоупа системы).
+
+  parameters:
+    CourierId:
+      name: courierId
+      in: path
+      required: true
+      description: Идентификатор курьера.
+      schema: { type: string }
+      example: c_123
+    Granularity:
+      name: granularity
+      in: query
+      required: false
+      description: Гранулярность точек. По умолчанию — нативные 4 с.
+      schema:
+        type: string
+        enum: ["1s", "4s", "30s"]
+        default: "4s"
+    Format:
+      name: format
+      in: query
+      required: false
+      description: |
+        Представление трека: `json` (тройки `[tsEpochMs, lat, lon]`), `geojson` (LineString),
+        `polyline` (encoded polyline).
+      schema:
+        type: string
+        enum: [json, geojson, polyline]
+        default: json
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Курсор следующей страницы (из поля `next` предыдущего ответа).
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Максимум точек на страницу.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50000
+        default: 5000
+
+  schemas:
+    TicketRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [courier, client, dispatcher]
+          description: Роль, под которую выдаётся стрим (должна быть разрешена JWT).
+    TicketResponse:
+      type: object
+      required: [ticket, streamUrl, expiresInSec]
+      properties:
+        ticket: { type: string }
+        streamUrl: { type: string, format: uri }
+        expiresInSec: { type: integer, example: 30 }
+
+    Position:
+      type: object
+      required: [courierId, online, ts, lat, lon, asOf]
+      properties:
+        courierId: { type: string }
+        online: { type: boolean }
+        ts: { type: string, format: date-time }
+        lat: { type: number, format: double, minimum: -90, maximum: 90 }
+        lon: { type: number, format: double, minimum: -180, maximum: 180 }
+        speedMps: { type: number, format: float }
+        headingDeg: { type: number, format: float, minimum: 0, maximum: 360 }
+        asOf:
+          type: string
+          format: date-time
+          description: Момент, на который актуальны данные.
+        stalenessMs:
+          type: integer
+          description: Возраст данных в миллисекундах.
+
+    ViewportSnapshot:
+      type: object
+      required: [asOf, zoom, cells, markers]
+      properties:
+        asOf: { type: string, format: date-time }
+        zoom: { type: integer }
+        cells:
+          type: array
+          description: Кластеры (агрегаты) для плотных областей.
+          items: { $ref: '#/components/schemas/Cluster' }
+        markers:
+          type: array
+          description: Отдельные курьеры, не схлопнутые в кластер.
+          items: { $ref: '#/components/schemas/Marker' }
+    Cluster:
+      type: object
+      required: [key, count, lat, lon]
+      properties:
+        key: { type: string, description: Ключ гео-ячейки (geohash/S2/H3). }
+        count: { type: integer, description: Сколько курьеров в кластере. }
+        lat: { type: number, format: double }
+        lon: { type: number, format: double }
+        bbox:
+          type: array
+          description: Границы ячейки `[minLon, minLat, maxLon, maxLat]`.
+          items: { type: number }
+          minItems: 4
+          maxItems: 4
+    Marker:
+      type: object
+      required: [courierId, ts, lat, lon]
+      properties:
+        courierId: { type: string }
+        ts: { type: string, format: date-time }
+        lat: { type: number, format: double }
+        lon: { type: number, format: double }
+
+    Track:
+      type: object
+      description: |
+        Трек курьера. Метаданные одинаковы для всех форматов; полезная нагрузка присутствует ровно
+        в одном поле в зависимости от `format`: `points` (json), `geojson` (geojson) или
+        `polyline` (polyline).
+      required: [courierId, granularity]
+      properties:
+        courierId: { type: string }
+        date:
+          type: string
+          format: date
+          description: Присутствует для маршрута за день (`/route`).
+        from:
+          type: string
+          format: date-time
+          description: Присутствует для истории (`/history`).
+        to:
+          type: string
+          format: date-time
+          description: Присутствует для истории (`/history`).
+        granularity: { type: string, example: "4s" }
+        count:
+          type: integer
+          description: Число точек на текущей странице (для `format=json`).
+        points:
+          type: array
+          description: "Точки `[tsEpochMs, lat, lon]` (для `format=json`)."
+          items:
+            type: array
+            items: { type: number }
+            minItems: 3
+            maxItems: 3
+        geojson:
+          type: object
+          description: GeoJSON LineString (для `format=geojson`).
+          properties:
+            type: { type: string, enum: [LineString] }
+            coordinates:
+              type: array
+              items:
+                type: array
+                items: { type: number }
+                minItems: 2
+                maxItems: 2
+        polyline:
+          type: string
+          description: Encoded polyline (для `format=polyline`).
+        next:
+          type: [string, "null"]
+          description: Курсор следующей страницы или `null`, если страниц больше нет.
+
+    PingBatch:
+      type: object
+      required: [points]
+      properties:
+        points:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Ping' }
+    Ping:
+      type: object
+      required: [seq, ts, lat, lon]
+      properties:
+        seq:
+          type: integer
+          format: int64
+          description: Монотонный номер точки на устройстве (ключ дедупликации).
+        ts: { type: string, format: date-time }
+        lat: { type: number, format: double, minimum: -90, maximum: 90 }
+        lon: { type: number, format: double, minimum: -180, maximum: 180 }
+        accuracyM: { type: number, format: float }
+        speedMps: { type: number, format: float }
+        headingDeg: { type: number, format: float, minimum: 0, maximum: 360 }
+        batteryPct: { type: integer, minimum: 0, maximum: 100 }
+
+    Problem:
+      type: object
+      description: Ошибка в формате RFC 7807 (`application/problem+json`).
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        code:
+          type: string
+          description: Машиночитаемый код ошибки.
+        detail: { type: string }
+        instance: { type: string }
+
+  responses:
+    BadRequest:
+      description: Невалидные параметры запроса.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: "https://errors.example.com/bad-request"
+            title: Bad request
+            status: 400
+            code: BAD_REQUEST
+            detail: "Параметр bbox имеет неверный формат"
+    Unauthenticated:
+      description: Нет или просрочен JWT.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            title: Unauthenticated
+            status: 401
+            code: UNAUTHENTICATED
+    Forbidden:
+      description: Роль не разрешена токену.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            title: Forbidden
+            status: 403
+            code: FORBIDDEN
+    CourierNotFound:
+      description: Неизвестный courierId.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            title: Courier not found
+            status: 404
+            code: COURIER_NOT_FOUND
+    IdempotencyConflict:
+      description: Повтор Idempotency-Key с другим телом.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            title: Idempotency conflict
+            status: 409
+            code: IDEMPOTENCY_CONFLICT
+    HistoryPurged:
+      description: Запрос за пределы retention (>1 год) — данные удалены.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            title: History purged
+            status: 410
+            code: HISTORY_PURGED
+            detail: "Данные за пределами retention 1 год удалены"
+    BadRange:
+      description: Некорректный диапазон (`from > to` или окно слишком большое).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            title: Bad range
+            status: 416
+            code: BAD_RANGE
+    Unprocessable:
+      description: Несогласованные параметры (например, zoom и bbox).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            title: Unprocessable
+            status: 422
+            code: UNPROCESSABLE
+    RateLimited:
+      description: Превышен лимит запросов.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Через сколько секунд повторить.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            title: Rate limited
+            status: 429
+            code: RATE_LIMITED
+    Degraded:
+      description: Деградация live-пути; допустимо отдать слегка устаревшие данные.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            title: Degraded
+            status: 503
+            code: DEGRADED

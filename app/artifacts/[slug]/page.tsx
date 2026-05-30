@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { artifacts, getArtifact, renderArtifact } from '@/lib/artifacts';
+import Prose from '@/app/Prose';
 
 export function generateStaticParams() {
   return artifacts.map((a) => ({ slug: a.slug }));
@@ -54,7 +55,7 @@ export default function ArtifactPage({ params }: { params: { slug: string } }) {
           </h1>
         </div>
 
-        <div className="prose" dangerouslySetInnerHTML={{ __html: html }} />
+        <Prose html={html} />
 
         <nav className="pager">
           {prev ? (
