@@ -4,35 +4,32 @@ info:
   version: "1.0.0"
   description: |
     REST-поверхность системы, сгруппированная по функциям: отправка положений курьером,
-    API диспетчера, API клиента и общий хендшейк. Покрывает **только** request/response:
-    чтение истории и маршрута, снапшот вьюпорта, текущую позицию и выдачу тикета на стрим.
-
+    API оператора, API клиента и общий хендшейк.
+    
     Realtime-потоки (приём положений, подписка клиента, живой вьюпорт) идут по **WebSocket**
-    и описаны в артефакте `03_api.md` (§2–§4) — они не часть этого OpenAPI-контракта.
+    и описаны в артефакте `03_api.md`.
   contact:
     name: System Design — Courier Tracking
 servers:
-  - url: https://api.example.com
-    description: Production (условный хост)
+  - url: https://api.awesome-tracker.com
+    description: Production
 security:
   - bearerAuth: []
 tags:
-  - name: Курьер — отправка положений
+  - name: Курьер
     description: |
-      Основной путь приёма положений — WebSocket (см. артефакт API, §2): курьер держит
-      соединение, частота адаптируется по движению и наличию наблюдателей. Здесь — только
-      REST-fallback, когда постоянное соединение невозможно.
-  - name: Диспетчер
-    description: Снапшот области с кластеризацией и чтение истории (маршрут за день, период). Живой вьюпорт — по WebSocket (§3).
+      REST-fallback для приема координат курьера, когда постоянное соединение невозможно/сбоит
+  - name: Оператор
+    description: Снапшот области с кластеризацией
   - name: Клиент
-    description: Текущая позиция курьера для первой отрисовки. Живое слежение — по WebSocket (§4).
-  - name: Хендшейк
-    description: Выдача короткоживущего тикета для открытия любого WebSocket-стрима.
+    description: Текущая позиция курьера для первой отрисовки
+  - name: WebSocket Handshake
+    description: Выдача короткоживущего тикета для открытия любого WebSocket-стрима
 
 paths:
   /v1/realtime/tickets:
     post:
-      tags: [Хендшейк]
+      tags: [WebSocket Handshake]
       operationId: createRealtimeTicket
       summary: Выдать тикет на WebSocket-стрим
       description: |
@@ -104,12 +101,12 @@ paths:
 
   /v1/viewport:
     get:
-      tags: [Диспетчер]
+      tags: [Оператор]
       operationId: getViewportSnapshot
       summary: Кластеризованный снапшот вьюпорта
       description: |
         Снапшот всех курьеров в области карты с серверной кластеризацией (~150 маркеров на вьюпорт
-        независимо от плотности). Покрывает первую отрисовку диспетчера; live-обновления идут по
+        независимо от плотности). Покрывает первую отрисовку оператора; live-обновления идут по
         WebSocket.
       parameters:
         - name: bbox
@@ -157,7 +154,7 @@ paths:
 
   /v1/couriers/{courierId}/route:
     get:
-      tags: [Диспетчер]
+      tags: [Оператор]
       operationId: getCourierRoute
       summary: Маршрут курьера за сегодня
       description: |
@@ -205,7 +202,7 @@ paths:
 
   /v1/couriers/{courierId}/history:
     get:
-      tags: [Диспетчер]
+      tags: [Оператор]
       operationId: getCourierHistory
       summary: История перемещений за период
       description: |
@@ -265,7 +262,7 @@ paths:
 
   /v1/couriers/{courierId}/pings:
     post:
-      tags: [Курьер — отправка положений]
+      tags: [Курьер]
       operationId: ingestPingsFallback
       summary: Приём пинга батчем (fallback)
       description: |
@@ -377,7 +374,7 @@ components:
       properties:
         role:
           type: string
-          enum: [courier, client, dispatcher]
+          enum: [courier, client, operator]
           description: Роль, под которую выдаётся стрим (должна быть разрешена JWT).
     TicketResponse:
       type: object
@@ -497,8 +494,11 @@ components:
 
     PingBatch:
       type: object
-      required: [points]
+      required: [installId, points]
       properties:
+        installId:
+          type: string
+          description: Идентификатор установки приложения; часть ключа дедупа (courierId+installId+seq), меняется при переустановке.
         points:
           type: array
           minItems: 1
@@ -510,7 +510,7 @@ components:
         seq:
           type: integer
           format: int64
-          description: Монотонный номер точки на устройстве (ключ дедупликации).
+          description: Монотонный номер точки в рамках установки; ключ дедупа — (courierId, installId, seq).
         ts: { type: string, format: date-time }
         lat: { type: number, format: double, minimum: -90, maximum: 90 }
         lon: { type: number, format: double, minimum: -180, maximum: 180 }

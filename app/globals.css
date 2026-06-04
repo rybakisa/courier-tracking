@@ -446,6 +446,34 @@ a:hover {
   overflow: hidden;
 }
 
+/* ---------- C4: растровые PNG-схемы (клик — полный размер) ---------- */
+.prose figure.schema {
+  margin: 22px 0;
+  text-align: center;
+}
+
+.prose figure.schema a,
+.prose figure.schema a:hover {
+  display: inline-block;
+  text-decoration: none;
+}
+
+.prose figure.schema img {
+  max-width: 100%;
+  max-height: 78vh;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: zoom-in;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.prose figure.schema a:hover img {
+  border-color: var(--accent);
+  box-shadow: 0 6px 20px rgba(79, 70, 229, 0.08);
+}
+
 .prose table {
   border-collapse: collapse;
   width: 100%;
