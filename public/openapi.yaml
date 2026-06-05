@@ -4,10 +4,10 @@ info:
   version: "1.0.0"
   description: |
     REST-поверхность системы, сгруппированная по функциям: отправка положений курьером,
-    API оператора, API клиента и общий хендшейк.
-    
+    API оператора и общий хендшейк.
+
     Realtime-потоки (приём положений, подписка клиента, живой вьюпорт) идут по **WebSocket**
-    и описаны в артефакте `03_api.md`.
+    и описаны в артефакте `02_api.md`.
   contact:
     name: System Design — Courier Tracking
 servers:
@@ -21,8 +21,6 @@ tags:
       REST-fallback для приема координат курьера, когда постоянное соединение невозможно/сбоит
   - name: Оператор
     description: Снапшот области с кластеризацией
-  - name: Клиент
-    description: Текущая позиция курьера для первой отрисовки
   - name: WebSocket Handshake
     description: Выдача короткоживущего тикета для открытия любого WebSocket-стрима
 
@@ -56,48 +54,6 @@ paths:
                 expiresInSec: 30
         '401':
           $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '429':
-          $ref: '#/components/responses/RateLimited'
-
-  /v1/couriers/{courierId}/position:
-    get:
-      tags: [Клиент]
-      operationId: getCourierPosition
-      summary: Текущая позиция курьера
-      description: |
-        Последняя известная позиция одного курьера. Используется клиентом для мгновенной первой
-        отрисовки до установки WebSocket и для отладки. Данные — eventual consistency, ответ несёт
-        `asOf` и `stalenessMs`. Если курьер офлайн — `200` с `online: false`.
-      parameters:
-        - $ref: '#/components/parameters/CourierId'
-      responses:
-        '200':
-          description: Текущая (возможно слегка устаревшая) позиция
-          headers:
-            Cache-Control:
-              schema: { type: string, example: "no-store" }
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Position'
-              example:
-                courierId: c_123
-                online: true
-                ts: "2026-05-28T10:00:03Z"
-                lat: 55.751244
-                lon: 37.618423
-                speedMps: 4.2
-                headingDeg: 270
-                asOf: "2026-05-28T10:00:03Z"
-                stalenessMs: 180
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '404':
-          $ref: '#/components/responses/CourierNotFound'
-        '503':
-          $ref: '#/components/responses/Degraded'
 
   /v1/viewport:
     get:
@@ -129,9 +85,6 @@ paths:
       responses:
         '200':
           description: Снапшот вьюпорта
-          headers:
-            Cache-Control:
-              schema: { type: string, example: "no-store" }
           content:
             application/json:
               schema:
@@ -147,10 +100,6 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
-        '422':
-          $ref: '#/components/responses/Unprocessable'
-        '503':
-          $ref: '#/components/responses/Degraded'
 
   /v1/couriers/{courierId}/route:
     get:
@@ -169,17 +118,11 @@ paths:
           schema: { type: string, format: date }
           example: "2026-05-28"
         - $ref: '#/components/parameters/Granularity'
-        - $ref: '#/components/parameters/Format'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
           description: Маршрут за день
-          headers:
-            Cache-Control:
-              schema: { type: string, example: "public, max-age=15, must-revalidate" }
-            ETag:
-              schema: { type: string }
           content:
             application/json:
               schema:
@@ -197,8 +140,6 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/CourierNotFound'
-        '416':
-          $ref: '#/components/responses/BadRange'
 
   /v1/couriers/{courierId}/history:
     get:
@@ -207,7 +148,7 @@ paths:
       summary: История перемещений за период
       description: |
         История за произвольный период. Прошедшие дни immutable и агрессивно кэшируются. Глубина
-        хранения — 1 год; запрос за пределы retention возвращает `410 Gone`.
+        хранения — 1 год.
       parameters:
         - $ref: '#/components/parameters/CourierId'
         - name: from
@@ -223,17 +164,11 @@ paths:
           schema: { type: string, format: date-time }
           example: "2026-05-02T00:00:00Z"
         - $ref: '#/components/parameters/Granularity'
-        - $ref: '#/components/parameters/Format'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
           description: История за период
-          headers:
-            Cache-Control:
-              schema: { type: string, example: "public, max-age=31536000, immutable" }
-            ETag:
-              schema: { type: string }
           content:
             application/json:
               schema:
@@ -243,11 +178,10 @@ paths:
                 from: "2026-05-01T00:00:00Z"
                 to: "2026-05-02T00:00:00Z"
                 granularity: "30s"
-                geojson:
-                  type: LineString
-                  coordinates:
-                    - [37.6184, 55.7512]
-                    - [37.6185, 55.7513]
+                count: 2880
+                points:
+                  - [1777593600000, 55.7512, 37.6184]
+                  - [1777593630000, 55.7513, 37.6185]
                 next: null
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -255,10 +189,6 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/CourierNotFound'
-        '410':
-          $ref: '#/components/responses/HistoryPurged'
-        '416':
-          $ref: '#/components/responses/BadRange'
 
   /v1/couriers/{courierId}/pings:
     post:
@@ -283,15 +213,12 @@ paths:
             schema:
               $ref: '#/components/schemas/PingBatch'
             example:
+              installId: "inst_a1b2c3"
               points:
                 - seq: 1001
                   ts: "2026-05-28T10:00:00Z"
                   lat: 55.7512
                   lon: 37.6184
-                  accuracyM: 8
-                  speedMps: 4.2
-                  headingDeg: 270
-                  batteryPct: 73
       responses:
         '202':
           description: Батч принят (durable-запись в лог-брокер)
@@ -307,12 +234,6 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '429':
-          $ref: '#/components/responses/RateLimited'
 
 components:
   securitySchemes:
@@ -339,17 +260,6 @@ components:
         type: string
         enum: ["1s", "4s", "30s"]
         default: "4s"
-    Format:
-      name: format
-      in: query
-      required: false
-      description: |
-        Представление трека: `json` (тройки `[tsEpochMs, lat, lon]`), `geojson` (LineString),
-        `polyline` (encoded polyline).
-      schema:
-        type: string
-        enum: [json, geojson, polyline]
-        default: json
     Cursor:
       name: cursor
       in: query
@@ -383,25 +293,6 @@ components:
         ticket: { type: string }
         streamUrl: { type: string, format: uri }
         expiresInSec: { type: integer, example: 30 }
-
-    Position:
-      type: object
-      required: [courierId, online, ts, lat, lon, asOf]
-      properties:
-        courierId: { type: string }
-        online: { type: boolean }
-        ts: { type: string, format: date-time }
-        lat: { type: number, format: double, minimum: -90, maximum: 90 }
-        lon: { type: number, format: double, minimum: -180, maximum: 180 }
-        speedMps: { type: number, format: float }
-        headingDeg: { type: number, format: float, minimum: 0, maximum: 360 }
-        asOf:
-          type: string
-          format: date-time
-          description: Момент, на который актуальны данные.
-        stalenessMs:
-          type: integer
-          description: Возраст данных в миллисекундах.
 
     ViewportSnapshot:
       type: object
@@ -442,10 +333,7 @@ components:
 
     Track:
       type: object
-      description: |
-        Трек курьера. Метаданные одинаковы для всех форматов; полезная нагрузка присутствует ровно
-        в одном поле в зависимости от `format`: `points` (json), `geojson` (geojson) или
-        `polyline` (polyline).
+      description: Трек курьера — метаданные периода и точки `[tsEpochMs, lat, lon]` постранично.
       required: [courierId, granularity]
       properties:
         courierId: { type: string }
@@ -464,30 +352,15 @@ components:
         granularity: { type: string, example: "4s" }
         count:
           type: integer
-          description: Число точек на текущей странице (для `format=json`).
+          description: Число точек на текущей странице.
         points:
           type: array
-          description: "Точки `[tsEpochMs, lat, lon]` (для `format=json`)."
+          description: "Точки `[tsEpochMs, lat, lon]`."
           items:
             type: array
             items: { type: number }
             minItems: 3
             maxItems: 3
-        geojson:
-          type: object
-          description: GeoJSON LineString (для `format=geojson`).
-          properties:
-            type: { type: string, enum: [LineString] }
-            coordinates:
-              type: array
-              items:
-                type: array
-                items: { type: number }
-                minItems: 2
-                maxItems: 2
-        polyline:
-          type: string
-          description: Encoded polyline (для `format=polyline`).
         next:
           type: [string, "null"]
           description: Курсор следующей страницы или `null`, если страниц больше нет.
@@ -514,10 +387,6 @@ components:
         ts: { type: string, format: date-time }
         lat: { type: number, format: double, minimum: -90, maximum: 90 }
         lon: { type: number, format: double, minimum: -180, maximum: 180 }
-        accuracyM: { type: number, format: float }
-        speedMps: { type: number, format: float }
-        headingDeg: { type: number, format: float, minimum: 0, maximum: 360 }
-        batteryPct: { type: integer, minimum: 0, maximum: 100 }
 
     Problem:
       type: object
@@ -553,15 +422,6 @@ components:
             title: Unauthenticated
             status: 401
             code: UNAUTHENTICATED
-    Forbidden:
-      description: Роль не разрешена токену.
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/Problem' }
-          example:
-            title: Forbidden
-            status: 403
-            code: FORBIDDEN
     CourierNotFound:
       description: Неизвестный courierId.
       content:
@@ -571,62 +431,3 @@ components:
             title: Courier not found
             status: 404
             code: COURIER_NOT_FOUND
-    IdempotencyConflict:
-      description: Повтор Idempotency-Key с другим телом.
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/Problem' }
-          example:
-            title: Idempotency conflict
-            status: 409
-            code: IDEMPOTENCY_CONFLICT
-    HistoryPurged:
-      description: Запрос за пределы retention (>1 год) — данные удалены.
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/Problem' }
-          example:
-            title: History purged
-            status: 410
-            code: HISTORY_PURGED
-            detail: "Данные за пределами retention 1 год удалены"
-    BadRange:
-      description: Некорректный диапазон (`from > to` или окно слишком большое).
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/Problem' }
-          example:
-            title: Bad range
-            status: 416
-            code: BAD_RANGE
-    Unprocessable:
-      description: Несогласованные параметры (например, zoom и bbox).
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/Problem' }
-          example:
-            title: Unprocessable
-            status: 422
-            code: UNPROCESSABLE
-    RateLimited:
-      description: Превышен лимит запросов.
-      headers:
-        Retry-After:
-          schema: { type: integer }
-          description: Через сколько секунд повторить.
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/Problem' }
-          example:
-            title: Rate limited
-            status: 429
-            code: RATE_LIMITED
-    Degraded:
-      description: Деградация live-пути; допустимо отдать слегка устаревшие данные.
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/Problem' }
-          example:
-            title: Degraded
-            status: 503
-            code: DEGRADED
