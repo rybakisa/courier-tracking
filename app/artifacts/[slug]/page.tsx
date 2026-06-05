@@ -47,9 +47,9 @@ export default function ArtifactPage({ params }: { params: { slug: string } }) {
 
       <article className="content">
         <div className="content-head">
-          <span className={`badge ${artifact.status}`}>
-            {artifact.status === 'done' ? 'Готово' : 'В работе'}
-          </span>
+          {artifact.status !== 'done' && (
+            <span className={`badge ${artifact.status}`}>В работе</span>
+          )}
           <h1>
             {artifact.num}. {artifact.title}
           </h1>

@@ -515,6 +515,26 @@ a:hover {
   border-bottom-color: var(--accent);
 }
 
+/* ---------- section refs (§) ---------- */
+.prose a.sec-ref {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.prose a.sec-ref:hover {
+  color: var(--accent);
+  border-bottom-style: solid;
+}
+
+/* Якоря разделов не должны прятаться под липкой шапкой при переходе по «§». */
+.prose [id] {
+  scroll-margin-top: 80px;
+}
+
 /* ---------- pager ---------- */
 .pager {
   display: flex;

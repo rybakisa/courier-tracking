@@ -28,7 +28,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </header>
         {children}
         <footer className="site-footer">
-          Учебный проект по системному дизайну · 7 артефактов · собрано на Next.js
+          Учебный проект по системному дизайну · 7 артефактов
         </footer>
       </body>
     </html>

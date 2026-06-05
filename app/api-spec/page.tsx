@@ -15,7 +15,7 @@ export default function ApiSpecPage() {
     <div className="api-spec">
       <div className="api-spec-head">
         <Link href="/artifacts/api" className="api-spec-back">
-          ← 03. API
+          ← 02. API
         </Link>
         <h1>REST API — Swagger UI</h1>
         <p>

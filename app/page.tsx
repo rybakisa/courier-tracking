@@ -44,9 +44,9 @@ export default function Home() {
           <Link key={a.slug} href={`/artifacts/${a.slug}`} className="card">
             <div className="card-top">
               <span className="card-num">АРТЕФАКТ {a.num}</span>
-              <span className={`badge ${a.status}`}>
-                {a.status === 'done' ? 'Готово' : 'В работе'}
-              </span>
+              {a.status !== 'done' && (
+                <span className={`badge ${a.status}`}>В работе</span>
+              )}
             </div>
             <h3>{a.title}</h3>
             <p>{a.subtitle}</p>

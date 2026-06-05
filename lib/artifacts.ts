@@ -24,19 +24,19 @@ export const artifacts: Artifact[] = [
     status: 'done',
   },
   {
-    slug: 'calculations',
+    slug: 'api',
     num: '02',
-    title: 'Расчёты',
-    subtitle: 'RPS, объём хранилища, throughput, fan-out и сайзинг серверов',
-    file: '02_calculations.md',
+    title: 'API',
+    subtitle: 'Выбор REST/GraphQL/gRPC по потокам, контракты, OpenAPI/Swagger',
+    file: '02_api.md',
     status: 'done',
   },
   {
-    slug: 'api',
+    slug: 'calculations',
     num: '03',
-    title: 'API',
-    subtitle: 'Выбор REST/GraphQL/gRPC по потокам, контракты, OpenAPI/Swagger',
-    file: '03_api.md',
+    title: 'Расчёты',
+    subtitle: 'RPS, объём хранилища, throughput, fan-out и сайзинг серверов',
+    file: '03_calculations.md',
     status: 'done',
   },
   {
@@ -119,6 +119,56 @@ function linkRequirementRefs(html: string, isRequirementsPage: boolean): string 
     .join('');
 }
 
+/** Карта «номер артефакта» → slug (для кросс-ссылок вида «артефакт 05 §3»). */
+const NUM_TO_SLUG: Record<string, string> = {};
+for (const a of artifacts) NUM_TO_SLUG[a.num] = a.slug;
+
+const pad2 = (n: string): string => (n.length < 2 ? `0${n}` : n);
+
+/**
+ * Делает ссылки на разделы «§N» кликабельными. Сначала проставляет id=`s{N}` заголовкам
+ * верхнего уровня (`# N. …` → `<h1 id="sN">`), затем превращает токены `§N` в ссылки:
+ *  • «артефакт NN §M» / «(NN §M)» / «расчёты, §M» → раздел нужного артефакта (`/artifacts/{slug}#sM`);
+ *  • голый «§N» → раздел текущей страницы (`#sN`), но только если такой раздел на ней есть
+ *    (иначе остаётся обычным текстом — без битых якорей).
+ * Содержимое блоков `<pre>` не трогаем (как в linkRequirementRefs).
+ */
+function linkSectionRefs(html: string, currentSlug: string | undefined): string {
+  const present = new Set<string>();
+  const withAnchors = html.replace(/<h1>(\d+)\./g, (_m: string, n: string) => {
+    present.add(n);
+    return `<h1 id="s${n}">${n}.`;
+  });
+
+  const re =
+    /(?:(артефакт[а-яё]*)\s+(\d{1,2})\s*|(расчёт[а-яё]*),?\s*|(\d{1,2})\s+)?§(\d+)/g;
+  const transform = (text: string): string =>
+    text.replace(
+      re,
+      (match: string, _art: string, artNum: string, calcWord: string, bareNum: string, sec: string) => {
+        const hasIndicator = Boolean(artNum || calcWord || bareNum);
+        let slug: string | undefined;
+        if (artNum) slug = NUM_TO_SLUG[pad2(artNum)];
+        else if (calcWord) slug = 'calculations';
+        else if (bareNum) slug = NUM_TO_SLUG[pad2(bareNum)];
+        if (hasIndicator) {
+          return slug
+            ? `<a class="sec-ref" href="/artifacts/${slug}#s${sec}">${match}</a>`
+            : match;
+        }
+        if (currentSlug && present.has(sec)) {
+          return `<a class="sec-ref" href="#s${sec}">§${sec}</a>`;
+        }
+        return match;
+      },
+    );
+
+  return withAnchors
+    .split(/(<pre[\s\S]*?<\/pre>)/g)
+    .map((chunk) => (chunk.startsWith('<pre') ? chunk : transform(chunk)))
+    .join('');
+}
+
 /**
  * Превращает блоки ```mermaid (marked рендерит их в `<pre><code class="language-mermaid">`)
  * в `<div class="mermaid">`, чтобы клиентский Mermaid отрисовал их в SVG (см. app/Prose.tsx).
@@ -137,6 +187,8 @@ export function renderArtifact(file: string): string {
   const fullPath = path.join(process.cwd(), file);
   const md = fs.readFileSync(fullPath, 'utf-8');
   const html = marked.parse(md, { async: false, gfm: true }) as string;
-  const linked = linkRequirementRefs(html, file === '01_requirements.md');
-  return activateMermaidBlocks(linked);
+  const slug = artifacts.find((a) => a.file === file)?.slug;
+  const withReqs = linkRequirementRefs(html, file === '01_requirements.md');
+  const withSecs = linkSectionRefs(withReqs, slug);
+  return activateMermaidBlocks(withSecs);
 }
